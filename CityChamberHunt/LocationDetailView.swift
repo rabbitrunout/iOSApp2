@@ -1,11 +1,14 @@
-// LocationDetailView.swift
+//
+//  LocationDetailView.swift
+//  CityChamberHunt
+//
+
 import SwiftUI
 import MapKit
 import PhotosUI
 
 struct LocationDetailView: View {
     let location: HuntLocation
-    @State private var flipped = false
     @State private var userImage: UIImage?
     @State private var showCamera = false
     @State private var selectedItem: PhotosPickerItem?
@@ -16,8 +19,9 @@ struct LocationDetailView: View {
     
     var body: some View {
         VStack {
-            ZStack {
-                // Front — название, адрес, карта
+            // Используем FlipCard (берётся из FlipCard.swift)
+            FlipCard {
+                // FRONT: название + полный адрес + карта
                 VStack(spacing: 12) {
                     Text(location.name)
                         .font(.title)
@@ -29,12 +33,31 @@ struct LocationDetailView: View {
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
+                        .lineLimit(nil)
                     
-                    Map {
+                    // ✅ увеличенная карта
+                    Map(initialPosition: .region(
+                        MKCoordinateRegion(
+                            center: coordinate,
+                            latitudinalMeters: 5000,
+                            longitudinalMeters: 5000
+                        )
+                    )) {
                         Marker(location.name, coordinate: coordinate)
                     }
-                    .frame(height: 180)
-                    .cornerRadius(12)
+                    .frame(height: 300)
+                    .cornerRadius(16)
+                    .shadow(radius: 6)
+                    
+                    // ✅ кнопка "Открыть в Apple Maps"
+                    Button {
+                        openInAppleMaps()
+                    } label: {
+                        Label("Open in Apple Maps", systemImage: "map")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.horizontal)
                     
                     Spacer()
                     Text("Tap to flip ↻")
@@ -42,12 +65,12 @@ struct LocationDetailView: View {
                         .foregroundColor(.gray)
                 }
                 .padding()
-                .frame(maxWidth: .infinity, maxHeight: 350)
+                .frame(maxWidth: .infinity, maxHeight: 520)
                 .background(.thinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
-                .opacity(flipped ? 0 : 1)
-                
-                // Back — фото пользователя или заглушка
+                .shadow(radius: 6)
+            } back: {
+                // BACK: фото пользователя или заглушка
                 VStack {
                     if let img = userImage {
                         Image(uiImage: img)
@@ -67,9 +90,8 @@ struct LocationDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: 350)
                 .background(.thinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
-                .opacity(flipped ? 1 : 0)
+                .shadow(radius: 6)
             }
-            .onTapGesture { flipped.toggle() }
             .padding()
             
             // Кнопки для фото
@@ -102,15 +124,23 @@ struct LocationDetailView: View {
                 }
             }
         }
-
+    }
+    
+    // MARK: - Open in Apple Maps
+    private func openInAppleMaps() {
+        let placemark = MKPlacemark(coordinate: coordinate)
+        let mapItem = MKMapItem(placemark: placemark)
+        mapItem.name = location.name
+        mapItem.openInMaps(launchOptions: [
+            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
+        ])
     }
 }
-
 
 #Preview {
     LocationDetailView(location: HuntLocation(
         name: "Starlight Cinema",
-        address: "123 Main Street, Mississauga",
+        address: "123 Main Street, Mississauga, Ontario, Canada L5B 4C4",
         lat: 43.589,
         lon: -79.644
     ))

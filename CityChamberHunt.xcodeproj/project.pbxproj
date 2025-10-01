@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		80A8BB642E8DCC8100F9870B /* CityChamberHunt-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 80A8BB632E8DCC8100F9870B /* CityChamberHunt-Info.plist */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		80A8BB1F2E8D8D2100F9870B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,6 +31,7 @@
 		80A8BB112E8D8D1B00F9870B /* CityChamberHunt.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CityChamberHunt.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		80A8BB1E2E8D8D2100F9870B /* CityChamberHuntTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CityChamberHuntTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		80A8BB282E8D8D2100F9870B /* CityChamberHuntUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CityChamberHuntUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		80A8BB632E8DCC8100F9870B /* CityChamberHunt-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "CityChamberHunt-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -75,6 +80,7 @@
 		80A8BB082E8D8D1B00F9870B = {
 			isa = PBXGroup;
 			children = (
+				80A8BB632E8DCC8100F9870B /* CityChamberHunt-Info.plist */,
 				80A8BB132E8D8D1B00F9870B /* CityChamberHunt */,
 				80A8BB212E8D8D2100F9870B /* CityChamberHuntTests */,
 				80A8BB2B2E8D8D2100F9870B /* CityChamberHuntUITests */,
@@ -212,6 +218,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				80A8BB642E8DCC8100F9870B /* CityChamberHunt-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

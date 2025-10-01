@@ -2,49 +2,73 @@
 //  CameraPicker.swift
 //  CityChamberHunt
 //
-//  Created by Irina Saf on 2025-10-01.
-//
 
 import SwiftUI
 import UIKit
 
 struct CameraPicker: UIViewControllerRepresentable {
-    var onCapture: (UIImage?) -> Void
-    
+    var onImagePicked: (UIImage?) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onImagePicked: onImagePicked)
+    }
+
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
         picker.sourceType = .camera
         picker.delegate = context.coordinator
         return picker
     }
-    
+
     func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-    
-    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: CameraPicker
-        init(_ parent: CameraPicker) { self.parent = parent }
-        
+
+    // MARK: - Coordinator
+    class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        var onImagePicked: (UIImage?) -> Void
+
+        init(onImagePicked: @escaping (UIImage?) -> Void) {
+            self.onImagePicked = onImagePicked
+        }
+
         func imagePickerController(_ picker: UIImagePickerController,
                                    didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
-            let image = (info[.editedImage] ?? info[.originalImage]) as? UIImage
-                ?? info[.originalImage] as? UIImage
-            parent.onCapture(image)
             picker.dismiss(animated: true)
+
+            guard let originalImage = info[.originalImage] as? UIImage else {
+                onImagePicked(nil)
+                return
+            }
+
+            var fixedImage = originalImage.fixedOrientation()
+
+            // ✅ Зеркалим только если фото сделано фронтальной камерой
+            if picker.cameraDevice == .front {
+                fixedImage = fixedImage.withHorizontallyFlippedOrientation()
+            }
+
+            onImagePicked(fixedImage)
         }
-        
+
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.onCapture(nil)
             picker.dismiss(animated: true)
+            onImagePicked(nil)
         }
     }
 }
 
-
-#Preview {
-    CameraPicker { _ in } // заглушка для Canvas
+// MARK: - UIImage Extension
+extension UIImage {
+    /// Исправление EXIF ориентации → всегда .up
+    func fixedOrientation() -> UIImage {
+        if imageOrientation == .up { return self }
+        UIGraphicsBeginImageContextWithOptions(size, false, scale)
+        draw(in: CGRect(origin: .zero, size: size))
+        let normalizedImage = UIGraphicsGetImageFromCurrentImageContext()!
+        UIGraphicsEndImageContext()
+        return normalizedImage
+    }
 }
 
+#Preview {
+    CameraPicker { _ in }
+}

@@ -9,9 +9,10 @@ import PhotosUI
 
 struct LocationDetailView: View {
     let location: HuntLocation
-    @State private var userImage: UIImage?
+    @State private var userImage: UIImage?          // фото из камеры/галереи
     @State private var showCamera = false
     @State private var selectedItem: PhotosPickerItem?
+    @State private var photoURL: URL?               // фото из Unsplash
     
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: location.lat, longitude: location.lon)
@@ -19,9 +20,9 @@ struct LocationDetailView: View {
     
     var body: some View {
         VStack {
-            // Используем FlipCard (берётся из FlipCard.swift)
+            // ✅ Используем FlipCard
             FlipCard {
-                // FRONT: название + полный адрес + карта
+                // FRONT: название + адрес + карта
                 VStack(spacing: 12) {
                     Text(location.name)
                         .font(.title)
@@ -35,7 +36,6 @@ struct LocationDetailView: View {
                         .padding(.horizontal)
                         .lineLimit(nil)
                     
-                    // ✅ увеличенная карта
                     Map(initialPosition: .region(
                         MKCoordinateRegion(
                             center: coordinate,
@@ -49,7 +49,6 @@ struct LocationDetailView: View {
                     .cornerRadius(16)
                     .shadow(radius: 6)
                     
-                    // ✅ кнопка "Открыть в Apple Maps"
                     Button {
                         openInAppleMaps()
                     } label: {
@@ -70,14 +69,38 @@ struct LocationDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .shadow(radius: 6)
             } back: {
-                // BACK: фото пользователя или заглушка
+                // BACK: фото (своё или из API)
                 VStack {
                     if let img = userImage {
+                        // Фото из камеры или библиотеки
                         Image(uiImage: img)
                             .resizable()
                             .scaledToFit()
                             .frame(maxHeight: 300)
                             .cornerRadius(12)
+                    } else if let url = photoURL {
+                        // Фото из Unsplash
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty:
+                                ProgressView("Loading...")
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxHeight: 300)
+                                    .cornerRadius(12)
+                            case .failure:
+                                VStack {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .foregroundColor(.red)
+                                    Text("Error loading photo")
+                                        .foregroundColor(.secondary)
+                                }
+                            @unknown default:
+                                EmptyView()
+                            }
+                        }
                     } else {
                         VStack {
                             Image(systemName: "photo")
@@ -109,6 +132,17 @@ struct LocationDetailView: View {
                 .buttonStyle(.bordered)
             }
         }
+        .onAppear {
+            // ✅ Загружаем фото с Unsplash, если пользователь не сделал своё
+            if userImage == nil && photoURL == nil {
+                Task {
+                    if let urlString = try? await PhotoAPI.shared.fetchPhoto(for: location.name),
+                       let url = URL(string: urlString) {
+                        photoURL = url
+                    }
+                }
+            }
+        }
         .onChange(of: selectedItem) { _, newVal in
             Task {
                 if let data = try? await newVal?.loadTransferable(type: Data.self),
@@ -128,8 +162,10 @@ struct LocationDetailView: View {
     
     // MARK: - Open in Apple Maps
     private func openInAppleMaps() {
-        let placemark = MKPlacemark(coordinate: coordinate)
-        let mapItem = MKMapItem(placemark: placemark)
+        let mapItem = MKMapItem(
+            location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
+            address: nil
+        )
         mapItem.name = location.name
         mapItem.openInMaps(launchOptions: [
             MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving

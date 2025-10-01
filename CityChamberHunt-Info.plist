@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UNSPLASH_ACCESS_KEY</key>
+	<string>lcMt5epPJyp3dEpCBTH_s1anwCwAOobQyZVw-tK8qYM</string>
+	<key>NSCameraUsageDescription</key>
+	<string>We need access to your camera to take photos of scavenger hunt locations.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>We need access to your photo library to upload scavenger hunt photos.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>We need your location to show scavenger hunt spots near you.</string>
+</dict>
+</plist>

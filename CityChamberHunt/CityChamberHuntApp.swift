@@ -9,6 +9,11 @@ import SwiftUI
 
 @main
 struct CityChamberHuntApp: App {
+    init() {
+        let unsplashKey = Bundle.main.infoDictionary?["UNSPLASH_ACCESS_KEY"] as? String ?? ""
+        print("🔑 Unsplash Key:", unsplashKey)
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

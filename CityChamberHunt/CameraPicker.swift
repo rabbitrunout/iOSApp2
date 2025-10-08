@@ -1,13 +1,9 @@
-//
-//  CameraPicker.swift
-//  CityChamberHunt
-//
-
 import SwiftUI
 import UIKit
 
 struct CameraPicker: UIViewControllerRepresentable {
     var onImagePicked: (UIImage?) -> Void
+    var cameraDevice: UIImagePickerController.CameraDevice = .rear
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onImagePicked: onImagePicked)
@@ -16,6 +12,9 @@ struct CameraPicker: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
         picker.sourceType = .camera
+        if UIImagePickerController.isCameraDeviceAvailable(cameraDevice) {
+            picker.cameraDevice = cameraDevice
+        }
         picker.delegate = context.coordinator
         return picker
     }
@@ -41,7 +40,7 @@ struct CameraPicker: UIViewControllerRepresentable {
 
             var fixedImage = originalImage.fixedOrientation()
 
-            // ✅ Зеркалим только если фото сделано фронтальной камерой
+            // ✅ Зеркалим только если фронтальная камера
             if picker.cameraDevice == .front {
                 fixedImage = fixedImage.withHorizontallyFlippedOrientation()
             }
@@ -56,9 +55,8 @@ struct CameraPicker: UIViewControllerRepresentable {
     }
 }
 
-// MARK: - UIImage Extension
+// MARK: - UIImage Helpers
 extension UIImage {
-    /// Исправление EXIF ориентации → всегда .up
     func fixedOrientation() -> UIImage {
         if imageOrientation == .up { return self }
         UIGraphicsBeginImageContextWithOptions(size, false, scale)

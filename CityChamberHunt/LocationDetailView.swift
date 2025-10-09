@@ -2,8 +2,6 @@
 //  LocationDetailView.swift
 //  CityChamberHunt
 //
-//  Created by Irina Saf on 2025-10-08.
-//
 
 import SwiftUI
 import MapKit
@@ -11,37 +9,27 @@ import PhotosUI
 
 struct LocationDetailView: View {
     let location: HuntLocation
-    let onSavePhoto: (HuntLocation, UIImage) -> Void
-    @State private var userImage: UIImage?
+    @Binding var userImage: UIImage?
+    var onSavePhoto: ((HuntLocation, UIImage) -> Void)? = nil
+
     @State private var showCamera = false
     @State private var selectedItem: PhotosPickerItem?
     @State private var photoURL: URL?
-    @State private var isImageVisible = false  // ✅ для анимации
+
+    private let fileManager = FileManager.default
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: location.lat, longitude: location.lon)
-    }
-
-    // ✅ Новая инициализация с уже сохранённым фото
-    init(location: HuntLocation,
-         initialImage: UIImage? = nil,
-         onSavePhoto: @escaping (HuntLocation, UIImage) -> Void) {
-        self.location = location
-        self._userImage = State(initialValue: initialImage)
-        self.onSavePhoto = onSavePhoto
     }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
                 FlipCard {
-                    // FRONT
                     VStack(spacing: 12) {
                         Text(location.name)
                             .font(.title)
                             .bold()
-                            .multilineTextAlignment(.center)
-                        
                         Text(location.address)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
@@ -49,76 +37,38 @@ struct LocationDetailView: View {
                             .padding(.horizontal)
 
                         Map(initialPosition: .region(
-                            MKCoordinateRegion(
-                                center: coordinate,
-                                latitudinalMeters: 8000,
-                                longitudinalMeters: 8000
-                            )
+                            MKCoordinateRegion(center: coordinate,
+                                               latitudinalMeters: 8000,
+                                               longitudinalMeters: 8000)
                         )) {
                             Marker(location.name, coordinate: coordinate)
                         }
                         .frame(height: 300)
                         .cornerRadius(16)
                         .shadow(radius: 6)
-
-                        Button {
-                            openInAppleMaps()
-                        } label: {
-                            Label("Open in Apple Maps", systemImage: "map")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .padding(.horizontal)
                     }
-                    .padding()
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .shadow(radius: 6)
-
                 } back: {
-                    // BACK
-                    VStack {
-                        if let img = userImage {
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxHeight: 300)
-                                .cornerRadius(12)
-                                .shadow(radius: 6)
-                                .opacity(isImageVisible ? 1 : 0)
-                                .scaleEffect(isImageVisible ? 1 : 0.95)
-                                .animation(.easeInOut(duration: 0.5), value: isImageVisible)
-                                .onAppear { isImageVisible = true }
-                        } else if let url = photoURL {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .empty:
-                                    ProgressView("Loading...")
-                                case .success(let image):
-                                    image.resizable()
-                                        .scaledToFit()
-                                        .cornerRadius(12)
-                                        .shadow(radius: 4)
-                                case .failure:
-                                    Label("Image not available", systemImage: "xmark.circle")
-                                @unknown default:
-                                    EmptyView()
-                                }
+                    if let img = userImage {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 300)
+                            .cornerRadius(12)
+                    } else if let url = photoURL {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty: ProgressView()
+                            case .success(let image): image.resizable().scaledToFit()
+                            case .failure: Text("Failed to load image")
+                            @unknown default: EmptyView()
                             }
-                        } else {
-                            Label("No photo yet", systemImage: "photo")
-                                .foregroundColor(.secondary)
-                                .padding(.top, 40)
                         }
+                    } else {
+                        Text("No photo yet").foregroundColor(.secondary)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: 350)
-                    .padding()
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
 
-                // 📸 Кнопки
-                HStack(spacing: 20) {
+                HStack {
                     Button {
                         showCamera = true
                     } label: {
@@ -138,7 +88,8 @@ struct LocationDetailView: View {
             CameraPicker { image in
                 if let img = image {
                     userImage = img
-                    onSavePhoto(location, img) // ✅ сохраняем в ContentView
+                    saveToDisk(img)
+                    onSavePhoto?(location, img)
                 }
             }
         }
@@ -147,42 +98,55 @@ struct LocationDetailView: View {
                 if let data = try? await newVal?.loadTransferable(type: Data.self),
                    let img = UIImage(data: data) {
                     userImage = img
-                    onSavePhoto(location, img) // ✅ сохраняем в ContentView
+                    saveToDisk(img)
+                    onSavePhoto?(location, img)
                 }
             }
         }
         .onAppear {
-            if userImage == nil && photoURL == nil {
-                Task {
-                    if let urlString = try? await PhotoAPI.shared.fetchPhoto(for: location.name),
-                       let url = URL(string: urlString) {
-                        photoURL = url
+            if userImage == nil {
+                if let saved = loadFromDisk() {
+                    userImage = saved
+                } else {
+                    Task {
+                        if let urlString = try? await PhotoAPI.shared.fetchPhoto(for: location.name),
+                           let url = URL(string: urlString) {
+                            photoURL = url
+                        }
                     }
                 }
             }
         }
     }
 
-    // ✅ Исправленный Apple Maps переход
-    private func openInAppleMaps() {
-        let placemark = MKPlacemark(coordinate: coordinate)
-        let mapItem = MKMapItem(placemark: placemark)
-        mapItem.name = location.name
-        mapItem.openInMaps(launchOptions: [
-            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
-        ])
+    private func saveToDisk(_ image: UIImage) {
+        guard let data = image.jpegData(compressionQuality: 0.8) else { return }
+        let filename = "\(location.id).jpg"
+        let url = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(filename)
+        try? data.write(to: url)
+    }
+
+    private func loadFromDisk() -> UIImage? {
+        let filename = "\(location.id).jpg"
+        let url = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(filename)
+        guard let data = try? Data(contentsOf: url),
+              let img = UIImage(data: data) else { return nil }
+        return img
     }
 }
 
 #Preview {
-    LocationDetailView(
+    @Previewable @State var testImage: UIImage? = nil
+    return LocationDetailView(
         location: HuntLocation(
-            name: "Starlight Cinema",
-            address: "123 Main Street, Mississauga, Ontario, Canada L5B 4C4",
-            lat: 43.589,
-            lon: -79.644
+            name: "Art Gallery",
+            address: "12 King St, Toronto, Canada",
+            lat: 43.65,
+            lon: -79.38
         ),
-        initialImage: UIImage(systemName: "photo.fill")!,
-        onSavePhoto: { _, _ in }
+        userImage: $testImage,
+        onSavePhoto: { loc, img in print("✅ Photo saved for \(loc.name)") }
     )
 }

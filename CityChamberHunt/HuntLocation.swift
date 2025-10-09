@@ -2,17 +2,17 @@
 //  HuntLocation.swift
 //  CityChamberHunt
 //
-//  Created by Irina Saf on 2025-10-01.
-//
 
 import Foundation
+import CoreLocation
 
-struct HuntLocation: Identifiable {
-    let id = UUID()
+/// Модель локации для игры City Chamber Hunt
+struct HuntLocation: Identifiable, Codable, Hashable {
+    /// Уникальный ID: комбинация имени и адреса (устойчивый между сессиями)
+    var id: String { "\(name)_\(address)".replacingOccurrences(of: " ", with: "_") }
+
     let name: String
     let address: String
     let lat: Double
     let lon: Double
-    var userPhotoFilename: String? = nil
 }
-

@@ -1,12 +1,19 @@
+//
+//  ContentView.swift
+//  CityChamberHunt
+//
+//  Created by Irina Safronova on 2025-10-15.
+//
+
 import SwiftUI
 import MapKit
 import PDFKit
 
 struct ContentView: View {
     @State private var huntLocations: [HuntLocation] = []
-    @State private var savedImages: [UUID: UIImage] = [:]
-    @State private var imageFilenames: [UUID: String] = [:]
-    @State private var photoInfo: [UUID: HuntPhotoInfo] = [:] // ✅ информация о фото
+    @State private var savedImages: [String: UIImage] = [:] // ключ = адрес
+    @State private var imageFilenames: [String: String] = [:]
+    @State private var photoInfo: [String: HuntPhotoInfo] = [:]
     @State private var searchQuery = ""
     @State private var isGeneratingPDF = false
     @State private var progressText = ""
@@ -17,8 +24,8 @@ struct ContentView: View {
 
     var body: some View {
         NavigationView {
-            VStack {
-                // 🔍 Поиск локаций
+            VStack(spacing: 12) {
+                // 🔍 Поиск
                 HStack {
                     TextField("Search location...", text: $searchQuery)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -27,33 +34,32 @@ struct ContentView: View {
                     Button("Find") {
                         LocationAPI.search(query: searchQuery) { result in
                             huntLocations = result
+                            loadSavedImages() // подгрузим фото к найденным
                         }
                     }
                     .buttonStyle(.borderedProminent)
                     .padding(.trailing)
                 }
-                .padding(.top)
 
-                // 📍 Список найденных локаций
+                // 📋 Список локаций
                 List(huntLocations) { location in
                     NavigationLink(
                         destination: LocationDetailView(
                             location: location,
                             userImage: Binding(
-                                get: { savedImages[location.id] },
+                                get: { savedImages[location.address] },
                                 set: { newImage in
-                                    savedImages[location.id] = newImage
+                                    savedImages[location.address] = newImage
                                 }
                             ),
                             onSavePhoto: { loc, img, source in
-                                savedImages[loc.id] = img
-                                saveImage(img, for: loc, source: source) // ✅ передаём реальный источник
+                                savedImages[loc.address] = img
+                                saveImage(img, for: loc, source: source)
                             }
                         )
-
                     ) {
                         HStack {
-                            if let thumb = savedImages[location.id] {
+                            if let thumb = savedImages[location.address] {
                                 Image(uiImage: thumb)
                                     .resizable()
                                     .scaledToFill()
@@ -66,9 +72,8 @@ struct ContentView: View {
                                     .foregroundColor(.gray)
                             }
 
-                            VStack(alignment: .leading) {
-                                Text(location.name)
-                                    .font(.headline)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(location.name).font(.headline)
                                 Text(location.address)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
@@ -77,7 +82,7 @@ struct ContentView: View {
                     }
                 }
 
-                // 🧾 Кнопка экспорта PDF
+                // 🧾 PDF экспорт
                 VStack(spacing: 6) {
                     if isGeneratingPDF {
                         ProgressView(progressText)
@@ -88,7 +93,13 @@ struct ContentView: View {
                     Button {
                         Task {
                             isGeneratingPDF = true
-                            progressText = "Preparing maps..."
+                            progressText = "Preparing data..."
+                            try? await Task.sleep(nanoseconds: 400_000_000)
+
+                            print("🧩 Locations: \(huntLocations.count)")
+                            print("🧩 Images: \(savedImages.count)")
+                            print("🧩 PhotoInfo: \(photoInfo.count)")
+
                             let snapshots = await preloadMaps(for: huntLocations)
                             progressText = "Generating PDF..."
                             await generatePDFReport(for: huntLocations,
@@ -112,99 +123,111 @@ struct ContentView: View {
         }
         .onAppear {
             loadSavedImages()
-            loadPhotoInfo() // ✅ подгружаем данные о фото
+            loadPhotoInfo()
         }
     }
 
-    // MARK: - 📸 Сохранение изображений
+    // MARK: - 📸 Сохранение фото по адресу
     func saveImage(_ image: UIImage, for location: HuntLocation, source: String) {
         guard let data = image.jpegData(compressionQuality: 0.8) else { return }
-        let filename = "\(location.id.uuidString).jpg"
+
+        let safeName = location.address.replacingOccurrences(of: "/", with: "_")
+        let filename = "\(safeName).jpg"
         let url = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(filename)
 
         do {
             try data.write(to: url)
-            imageFilenames[location.id] = filename
+            imageFilenames[location.address] = filename
             saveFilenamesToDefaults()
 
-            // ✅ сохраняем инфо о фото
-            let info = HuntPhotoInfo(filename: filename, dateAdded: Date(), source: source)
-            photoInfo[location.id] = info
+            let info = HuntPhotoInfo(
+                filename: filename,
+                dateAdded: Date(),
+                source: source + " (from location)",
+                address: location.address,
+                latitude: location.lat,
+                longitude: location.lon
+            )
+            photoInfo[location.address] = info
             savePhotoInfo()
+            UserDefaults.standard.synchronize()
 
-            print("✅ Saved image from \(source) for \(location.name)")
+            print("✅ Saved image for \(location.name) → \(filename)")
         } catch {
             print("❌ Failed to save image:", error)
         }
     }
 
-    // MARK: - 💾 Сохранение / загрузка информации о фото
+    // MARK: - 💾 Save / Load info
     func savePhotoInfo() {
         if let data = try? JSONEncoder().encode(photoInfo) {
             UserDefaults.standard.set(data, forKey: photoInfoKey)
+            UserDefaults.standard.synchronize()
+            print("💾 Photo info saved: \(photoInfo.count)")
         }
     }
 
     func loadPhotoInfo() {
         guard let data = UserDefaults.standard.data(forKey: photoInfoKey),
-              let saved = try? JSONDecoder().decode([UUID: HuntPhotoInfo].self, from: data) else { return }
+              let saved = try? JSONDecoder().decode([String: HuntPhotoInfo].self, from: data)
+        else { return }
         photoInfo = saved
+        print("📖 Restored \(photoInfo.count) photo infos")
     }
 
-    // MARK: - 💾 Загрузка сохранённых изображений
+    // MARK: - 💾 Загрузка фото с диска
     func loadSavedImages() {
         guard let data = UserDefaults.standard.data(forKey: filenamesKey),
-              let savedMap = try? JSONDecoder().decode([UUID: String].self, from: data)
-        else { return }
+              let savedMap = try? JSONDecoder().decode([String: String].self, from: data)
+        else {
+            print("⚠️ No saved filenames found in UserDefaults")
+            return
+        }
 
         imageFilenames = savedMap
-        var loadedImages: [UUID: UIImage] = [:]
+        var loadedImages: [String: UIImage] = [:]
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
-        for (id, filename) in savedMap {
-            let url = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent(filename)
+        for (address, filename) in savedMap {
+            let url = docs.appendingPathComponent(filename)
             if let imgData = try? Data(contentsOf: url),
                let img = UIImage(data: imgData) {
-                loadedImages[id] = img
+                loadedImages[address] = img
+                print("✅ Loaded:", filename)
+            } else {
+                print("⚠️ Missing:", filename)
             }
         }
 
         savedImages = loadedImages
-        print("📂 Restored \(savedImages.count) images from disk")
+        print("📂 Restored \(savedImages.count) images total")
     }
 
-    // MARK: - 🧠 Сохранение имён файлов
     func saveFilenamesToDefaults() {
         if let data = try? JSONEncoder().encode(imageFilenames) {
             UserDefaults.standard.set(data, forKey: filenamesKey)
+            UserDefaults.standard.synchronize()
+            print("💾 Filenames saved: \(imageFilenames.count)")
         }
     }
 
-    // MARK: - 🗺 Предзагрузка всех карт с кешированием
-    func preloadMaps(for locations: [HuntLocation]) async -> [UUID: UIImage] {
-        var result: [UUID: UIImage] = [:]
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let fallbackCoordinate = CLLocationCoordinate2D(latitude: 43.6532, longitude: -79.3832)
+    // MARK: - 🗺 Карты
+    func preloadMaps(for locations: [HuntLocation]) async -> [String: UIImage] {
+        var result: [String: UIImage] = [:]
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
-        for (index, loc) in locations.enumerated() {
-            let mapFilename = "\(loc.id.uuidString)_map.jpg"
-            let mapURL = documents.appendingPathComponent(mapFilename)
-
-            progressText = "Loading map \(index + 1) of \(locations.count)..."
+        for loc in locations {
+            let mapFilename = "\(loc.address.replacingOccurrences(of: "/", with: "_"))_map.jpg"
+            let mapURL = docs.appendingPathComponent(mapFilename)
 
             if let data = try? Data(contentsOf: mapURL),
                let cached = UIImage(data: data) {
-                result[loc.id] = cached
-                print("🗺 Loaded cached map for \(loc.name)")
+                result[loc.address] = cached
                 continue
             }
 
-            var coord = CLLocationCoordinate2D(latitude: loc.lat, longitude: loc.lon)
-            if coord.latitude == 0 || coord.longitude == 0 {
-                coord = fallbackCoordinate
-            }
-
+            let coord = CLLocationCoordinate2D(latitude: loc.lat, longitude: loc.lon)
             let opts = MKMapSnapshotter.Options()
             opts.region = MKCoordinateRegion(center: coord,
                                              latitudinalMeters: 4000,
@@ -223,174 +246,63 @@ struct ContentView: View {
                 UIGraphicsEndImageContext()
 
                 if let img = final {
-                    result[loc.id] = img
+                    result[loc.address] = img
                     if let data = img.jpegData(compressionQuality: 0.9) {
                         try? data.write(to: mapURL)
                     }
-                    print("✅ Map preloaded for \(loc.name)")
                 }
             } catch {
-                print("⚠️ Snapshot failed for \(loc.name): \(error.localizedDescription)")
+                print("⚠️ Map failed for \(loc.name)")
             }
-
-            try? await Task.sleep(nanoseconds: 400_000_000)
         }
-
         return result
     }
 
-    // MARK: - 📄 Генерация PDF отчёта с метаданными и обложкой
+    // MARK: - 📄 PDF
     func generatePDFReport(for locations: [HuntLocation],
-                           images: [UUID: UIImage],
-                           snapshots: [UUID: UIImage],
-                           photoInfo: [UUID: HuntPhotoInfo]) async {
+                           images: [String: UIImage],
+                           snapshots: [String: UIImage],
+                           photoInfo: [String: HuntPhotoInfo]) async {
         let pageWidth: CGFloat = 612
         let pageHeight: CGFloat = 792
         let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
-
         let format = UIGraphicsPDFRendererFormat()
-        format.documentInfo = [
-            kCGPDFContextCreator as String: "CityChamberHunt",
-            kCGPDFContextAuthor as String: "Irina Safronova"
-        ]
-
-        // 🗺 Загружаем кэшированные карты, если их нет в памяти
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        var fullSnapshots = snapshots
-        for loc in locations where fullSnapshots[loc.id] == nil {
-            let mapFilename = "\(loc.id.uuidString)_map.jpg"
-            let mapURL = documents.appendingPathComponent(mapFilename)
-            if let data = try? Data(contentsOf: mapURL),
-               let img = UIImage(data: data) {
-                fullSnapshots[loc.id] = img
-            }
-        }
 
         let renderer = UIGraphicsPDFRenderer(bounds: pageRect, format: format)
         let data = renderer.pdfData { ctx in
 
-            // 🔹 1. Обложка
+            // Обложка
             ctx.beginPage()
             let title = "🏙️ CityChamberHunt Report"
-            title.draw(in: CGRect(x: 0, y: 200, width: pageWidth, height: 60),
-                       withAttributes: [
-                        .font: UIFont.boldSystemFont(ofSize: 32),
-                        .paragraphStyle: {
-                            let s = NSMutableParagraphStyle(); s.alignment = .center; return s
-                        }(),
-                        .foregroundColor: UIColor.systemPurple
-                       ])
+            title.draw(in: CGRect(x: 0, y: 240, width: pageWidth, height: 60),
+                       withAttributes: [.font: UIFont.boldSystemFont(ofSize: 28),
+                                        .paragraphStyle: centered(),
+                                        .foregroundColor: UIColor.systemPurple])
+            "Generated on \(DateFormatter.localizedString(from: Date(), dateStyle: .medium, timeStyle: .short))"
+                .draw(in: CGRect(x: 0, y: 310, width: pageWidth, height: 30),
+                      withAttributes: [.font: UIFont.systemFont(ofSize: 14),
+                                       .paragraphStyle: centered(),
+                                       .foregroundColor: UIColor.gray])
 
-            let subtitle = "Collected by: Irina Safronova"
-            subtitle.draw(in: CGRect(x: 0, y: 270, width: pageWidth, height: 40),
-                          withAttributes: [
-                            .font: UIFont.systemFont(ofSize: 18),
-                            .paragraphStyle: {
-                                let s = NSMutableParagraphStyle(); s.alignment = .center; return s
-                            }(),
-                            .foregroundColor: UIColor.darkGray
-                          ])
-
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateStyle = .medium
-            let dateText = "Generated on: \(dateFormatter.string(from: Date()))"
-            dateText.draw(in: CGRect(x: 0, y: 310, width: pageWidth, height: 30),
-                          withAttributes: [
-                            .font: UIFont.systemFont(ofSize: 14),
-                            .paragraphStyle: {
-                                let s = NSMutableParagraphStyle(); s.alignment = .center; return s
-                            }(),
-                            .foregroundColor: UIColor.gray
-                          ])
-
-            let line = UIBezierPath()
-            line.move(to: CGPoint(x: 100, y: 360))
-            line.addLine(to: CGPoint(x: pageWidth - 100, y: 360))
-            UIColor.systemPurple.setStroke()
-            line.lineWidth = 2
-            line.stroke()
-
-            "Explore · Capture · Discover".draw(in: CGRect(x: 0, y: 400, width: pageWidth, height: 40),
-                                                withAttributes: [
-                                                    .font: UIFont.italicSystemFont(ofSize: 16),
-                                                    .paragraphStyle: {
-                                                        let s = NSMutableParagraphStyle()
-                                                        s.alignment = .center
-                                                        return s
-                                                    }(),
-                                                    .foregroundColor: UIColor.systemBlue
-                                                ])
-
-            // 🔹 2. Страницы с локациями
+            // Страницы локаций
             for loc in locations {
-                guard images[loc.id] != nil || fullSnapshots[loc.id] != nil else { continue }
+                guard let img = images[loc.address] else { continue }
                 ctx.beginPage()
 
-                // Заголовок
-                let title = "📍 \(loc.name)"
-                title.draw(in: CGRect(x: 20, y: 20, width: pageWidth - 40, height: 25),
-                           withAttributes: [.font: UIFont.boldSystemFont(ofSize: 18)])
-                loc.address.draw(in: CGRect(x: 20, y: 50, width: pageWidth - 40, height: 40),
-                                 withAttributes: [.font: UIFont.systemFont(ofSize: 14)])
+                PDFRenderer.drawHeader(title: loc.name, address: loc.address, on: ctx, in: pageRect)
+                PDFRenderer.drawImage(img, in: pageRect)
 
-                // 📅 Метаданные фото
-                if let info = photoInfo[loc.id] {
-                    let df = DateFormatter()
-                    df.dateStyle = .medium; df.timeStyle = .short
-                    let dateText = df.string(from: info.dateAdded)
-                    let details = "📅 Added: \(dateText)\n📸 Source: \(info.source)"
-                    details.draw(in: CGRect(x: 20, y: 90, width: pageWidth - 40, height: 40),
-                                 withAttributes: [
-                                    .font: UIFont.systemFont(ofSize: 12),
-                                    .foregroundColor: UIColor.gray
-                                 ])
+                if let info = photoInfo[loc.address] {
+                    PDFRenderer.drawMeta(info, on: ctx, in: pageRect)
                 }
 
-                // Фото
-                let yStart: CGFloat = 140
-                let imgMaxWidth = pageWidth - 60
-                let imgHeight: CGFloat = 220
-                if let img = images[loc.id] {
-                    let aspect = img.size.width / img.size.height
-                    let width = min(imgMaxWidth, imgHeight * aspect)
-                    let xOffset = (pageWidth - width) / 2
-                    let imgRect = CGRect(x: xOffset, y: yStart, width: width, height: imgHeight)
-                    img.draw(in: imgRect)
-                } else {
-                    "📸 No photo available".draw(in: CGRect(x: 20, y: yStart, width: pageWidth - 40, height: 30),
-                                                withAttributes: [.font: UIFont.italicSystemFont(ofSize: 14)])
-                }
-
-                // Карта
-                let mapY: CGFloat = yStart + imgHeight + 35
-                let mapWidth: CGFloat = 260
-                let mapHeight: CGFloat = 160
-                if let map = fullSnapshots[loc.id] {
-                    let mapRect = CGRect(x: (pageWidth - mapWidth) / 2,
-                                         y: mapY,
-                                         width: mapWidth,
-                                         height: mapHeight)
+                if let map = snapshots[loc.address] {
+                    let mapRect = CGRect(x: (pageWidth - 260) / 2, y: 480, width: 260, height: 160)
                     map.draw(in: mapRect)
-
-                    let footer = "Map data © OpenStreetMap / Apple MapKit"
-                    footer.draw(in: CGRect(x: 0, y: mapRect.maxY + 10, width: pageWidth, height: 20),
-                                withAttributes: [
-                                    .font: UIFont.systemFont(ofSize: 10),
-                                    .paragraphStyle: {
-                                        let s = NSMutableParagraphStyle()
-                                        s.alignment = .center
-                                        return s
-                                    }(),
-                                    .foregroundColor: UIColor.gray
-                                ])
-                } else {
-                    "🗺 Map unavailable".draw(in: CGRect(x: 20, y: mapY, width: pageWidth - 40, height: 30),
-                                             withAttributes: [.font: UIFont.italicSystemFont(ofSize: 14)])
                 }
             }
         }
 
-        // 📤 Экспорт PDF
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CityHunt_Report.pdf")
         do {
             try data.write(to: tempURL)
@@ -404,10 +316,11 @@ struct ContentView: View {
         }
     }
 
-
-
+    private func centered() -> NSMutableParagraphStyle {
+        let p = NSMutableParagraphStyle()
+        p.alignment = .center
+        return p
+    }
 }
 
-#Preview {
-    ContentView()
-}
+#Preview { ContentView() }

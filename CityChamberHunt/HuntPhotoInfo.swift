@@ -5,8 +5,8 @@
 
 import Foundation
 
-/// Метаданные о сохранённой фотографии (имя файла + дата)
 struct HuntPhotoInfo: Codable {
-    var filename: String
-    var date: Date
+    var filename: String          // Имя файла изображения
+    var dateAdded: Date           // Когда добавлено
+    var source: String            // "Camera", "Library", "Unsplash"
 }

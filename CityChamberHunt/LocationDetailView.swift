@@ -10,7 +10,7 @@ import PhotosUI
 struct LocationDetailView: View {
     let location: HuntLocation
     @Binding var userImage: UIImage?
-    var onSavePhoto: ((HuntLocation, UIImage) -> Void)? = nil
+    var onSavePhoto: ((HuntLocation, UIImage, String) -> Void)? = nil // ✅ добавили source
 
     @State private var showCamera = false
     @State private var selectedItem: PhotosPickerItem?
@@ -25,7 +25,7 @@ struct LocationDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                // ✅ FlipCard с постоянным ID
+                // ✅ FlipCard
                 FlipCard {
                     VStack(spacing: 12) {
                         Text(location.name)
@@ -68,7 +68,7 @@ struct LocationDetailView: View {
                         Text("No photo yet").foregroundColor(.secondary)
                     }
                 }
-                .id(location.id) // ✅ фикс: стабильный ID, чтобы FlipCard не сбрасывалась
+                .id(location.id)
 
                 HStack {
                     Button {
@@ -86,21 +86,24 @@ struct LocationDetailView: View {
             }
             .padding()
         }
+        // 📸 Камера
         .sheet(isPresented: $showCamera) {
             CameraPicker { image in
                 if let img = image {
-                    saveAndNotify(img)
+                    saveAndNotify(img, source: "Camera") // ✅ указываем источник
                 }
             }
         }
+        // 🖼️ Фото из библиотеки
         .onChange(of: selectedItem) { _, newVal in
             Task {
                 if let data = try? await newVal?.loadTransferable(type: Data.self),
                    let img = UIImage(data: data) {
-                    saveAndNotify(img)
+                    saveAndNotify(img, source: "Library") // ✅ указываем источник
                 }
             }
         }
+        // 🌐 Фото из Unsplash
         .onAppear {
             if userImage == nil {
                 if let saved = loadFromDisk() {
@@ -110,6 +113,11 @@ struct LocationDetailView: View {
                         if let urlString = try? await PhotoAPI.shared.fetchPhoto(for: location.name),
                            let url = URL(string: urlString) {
                             photoURL = url
+                            // Загружаем превью и сохраняем как Unsplash
+                            if let data = try? Data(contentsOf: url),
+                               let img = UIImage(data: data) {
+                                saveAndNotify(img, source: "Unsplash")
+                            }
                         }
                     }
                 }
@@ -118,10 +126,10 @@ struct LocationDetailView: View {
     }
 
     // MARK: - Helpers
-    private func saveAndNotify(_ image: UIImage) {
+    private func saveAndNotify(_ image: UIImage, source: String) {
         userImage = image
         saveToDisk(image)
-        onSavePhoto?(location, image)
+        onSavePhoto?(location, image, source) // ✅ передаём источник в ContentView
     }
 
     private func saveToDisk(_ image: UIImage) {

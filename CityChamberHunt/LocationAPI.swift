@@ -15,27 +15,51 @@ class LocationAPI {
     static func search(query: String, completion: @escaping ([HuntLocation]) -> Void) {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let urlString = "https://nominatim.openstreetmap.org/search?q=\(encoded)&format=json&limit=10&countrycodes=ca"
-        guard let url = URL(string: urlString) else { return }
+        guard let url = URL(string: urlString) else {
+            DispatchQueue.main.async { completion([]) }
+            return
+        }
 
         var request = URLRequest(url: url)
-        request.setValue("CityHuntApp/1.0 (irina.safronova@example.com)", forHTTPHeaderField: "User-Agent")
+        request.setValue("CityChamberHunt/1.0 (irina.safronova@example.com)", forHTTPHeaderField: "User-Agent")
 
-        URLSession.shared.dataTask(with: request) { data, _, _ in
-            guard let data = data else { return }
+        URLSession.shared.dataTask(with: request) { data, _, error in
+            guard let data = data, error == nil else {
+                print("❌ Network error:", error?.localizedDescription ?? "unknown")
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+
             do {
                 let decoded = try JSONDecoder().decode([NominatimResult].self, from: data)
-                let mapped = decoded.map {
-                    HuntLocation(
-                        name: $0.display_name.components(separatedBy: ",").first ?? "Unknown",
-                        address: $0.display_name,
-                        lat: Double($0.lat) ?? 0,
-                        lon: Double($0.lon) ?? 0
-                    )
 
+                let mapped = decoded.compactMap { result -> HuntLocation? in
+                    guard
+                        let lat = Double(result.lat),
+                        let lon = Double(result.lon),
+                        lat != 0, lon != 0
+                    else {
+                        print("⚠️ Skipped invalid coords for:", result.display_name)
+                        return nil
+                    }
+
+                    let title = result.display_name.components(separatedBy: ",").first ?? "Unknown"
+                    return HuntLocation(
+                        name: title,
+                        address: result.display_name,
+                        lat: lat,
+                        lon: lon
+                    )
                 }
-                DispatchQueue.main.async { completion(mapped) }
+
+                DispatchQueue.main.async {
+                    print("✅ Found \(mapped.count) valid locations")
+                    completion(mapped)
+                }
+
             } catch {
-                print("Decode error:", error)
+                print("❌ Decode error:", error)
+                DispatchQueue.main.async { completion([]) }
             }
         }.resume()
     }

@@ -285,22 +285,97 @@ struct ContentView: View {
                                        .foregroundColor: UIColor.gray])
 
             // Страницы локаций
+            // 🔹 Страницы для каждой локации
             for loc in locations {
-                guard let img = images[loc.address] else { continue }
+                guard let image = images[loc.address],
+                      let info = photoInfo[loc.address] else { continue }
+
                 ctx.beginPage()
 
-                PDFRenderer.drawHeader(title: loc.name, address: loc.address, on: ctx, in: pageRect)
-                PDFRenderer.drawImage(img, in: pageRect)
+                // 📍 Заголовок
+                let header = "📍 \(loc.name)"
+                header.draw(in: CGRect(x: 20, y: 20, width: pageWidth - 40, height: 25),
+                            withAttributes: [.font: UIFont.boldSystemFont(ofSize: 20)])
 
-                if let info = photoInfo[loc.address] {
-                    PDFRenderer.drawMeta(info, on: ctx, in: pageRect)
+                // 📖 Информация о фото
+                let formatter = DateFormatter()
+                formatter.dateStyle = .medium
+                formatter.timeStyle = .short
+
+                let infoText = """
+                🗺 Address: \(info.address ?? loc.address)
+                📅 Added: \(formatter.string(from: info.dateAdded))
+                📸 Source: \(info.source)
+                🌐 Coordinates: \(String(format: "%.5f, %.5f", info.latitude ?? loc.lat, info.longitude ?? loc.lon))
+                """
+                infoText.draw(in: CGRect(x: 20, y: 55, width: pageWidth - 40, height: 100),
+                              withAttributes: [.font: UIFont.systemFont(ofSize: 12),
+                                               .foregroundColor: UIColor.darkGray])
+
+                // 🖼 Фото
+                let imgMaxWidth = pageWidth - 60
+                let imgMaxHeight: CGFloat = 260
+                let aspectRatio = image.size.width / image.size.height
+                var imgWidth = imgMaxWidth
+                var imgHeight = imgWidth / aspectRatio
+                if imgHeight > imgMaxHeight {
+                    imgHeight = imgMaxHeight
+                    imgWidth = imgHeight * aspectRatio
                 }
 
+                let imgRect = CGRect(
+                    x: (pageWidth - imgWidth) / 2,
+                    y: 160,
+                    width: imgWidth,
+                    height: imgHeight
+                )
+                image.draw(in: imgRect)
+
+                // 🧾 Подпись под фото
+                let footerText = "📅 \(formatter.string(from: info.dateAdded)) • 📸 \(info.source)"
+                footerText.draw(in: CGRect(x: 0, y: imgRect.maxY + 8, width: pageWidth, height: 20),
+                                withAttributes: [
+                                    .font: UIFont.systemFont(ofSize: 10),
+                                    .paragraphStyle: {
+                                        let s = NSMutableParagraphStyle()
+                                        s.alignment = .center
+                                        return s
+                                    }(),
+                                    .foregroundColor: UIColor.gray
+                                ])
+
+                // 🗺 Карта под фото
                 if let map = snapshots[loc.address] {
-                    let mapRect = CGRect(x: (pageWidth - 260) / 2, y: 480, width: 260, height: 160)
+                    let mapWidth: CGFloat = 260
+                    let mapHeight: CGFloat = 160
+                    let mapY = imgRect.maxY + 40
+                    let mapRect = CGRect(
+                        x: (pageWidth - mapWidth) / 2,
+                        y: mapY,
+                        width: mapWidth,
+                        height: mapHeight
+                    )
                     map.draw(in: mapRect)
+
+                    // 🧭 Подписи под картой
+                    let coordText = String(format: "📍 Coordinates: %.5f, %.5f",
+                                           loc.lat, loc.lon)
+                    let addressText = "🏠 \(loc.address)"
+
+                    coordText.draw(in: CGRect(x: 40, y: mapRect.maxY + 10,
+                                              width: pageWidth - 80, height: 20),
+                                   withAttributes: [.font: UIFont.systemFont(ofSize: 10),
+                                                    .foregroundColor: UIColor.darkGray])
+                    addressText.draw(in: CGRect(x: 40, y: mapRect.maxY + 28,
+                                                width: pageWidth - 80, height: 40),
+                                     withAttributes: [.font: UIFont.systemFont(ofSize: 10),
+                                                      .foregroundColor: UIColor.gray])
+                } else {
+                    "🗺 Map unavailable".draw(in: CGRect(x: 20, y: 500, width: pageWidth - 40, height: 30),
+                                             withAttributes: [.font: UIFont.italicSystemFont(ofSize: 14)])
                 }
             }
+
         }
 
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CityHunt_Report.pdf")

@@ -2,195 +2,299 @@
 //  ContentView.swift
 //  CityChamberHunt
 //
+//  Created by Irina Safronova
+//
 
 import SwiftUI
+import MapKit
 import PDFKit
-import UIKit
 
 struct ContentView: View {
-    @State private var query: String = ""
-    @State private var locations: [HuntLocation] = []
-    @State private var userImages: [String: UIImage] = [:]
-    @State private var photoInfos: [String: HuntPhotoInfo] = [:]
+    @State private var huntLocations: [HuntLocation] = []
+    @State private var savedImages: [UUID: UIImage] = [:]
+    @State private var imageFilenames: [UUID: String] = [:]
+    @State private var searchQuery = ""
+    @State private var isGeneratingPDF = false
+    @State private var progressText = ""
 
     private let fileManager = FileManager.default
-    private var infoURL: URL {
-        fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("HuntPhotoInfo.json")
-    }
+    private let filenamesKey = "SavedLocationImages"
 
-    // MARK: - UI
     var body: some View {
-        NavigationStack {
+        NavigationView {
             VStack {
-                // 🔍 Поиск
+                // 🔍 Поиск локаций
                 HStack {
-                    TextField("Search local businesses...", text: $query)
-                        .textFieldStyle(.roundedBorder)
+                    TextField("Search location...", text: $searchQuery)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
                         .padding(.horizontal)
 
-                    Button("Go") {
-                        LocationAPI.search(query: query) { results in
-                            self.locations = results
-                            self.loadSavedImages()
+                    Button("Find") {
+                        LocationAPI.search(query: searchQuery) { result in
+                            huntLocations = result
                         }
                     }
                     .buttonStyle(.borderedProminent)
+                    .padding(.trailing)
                 }
                 .padding(.top)
 
-                // 📍 Список локаций
-                List(locations, id: \.id) { loc in
-                    NavigationLink(destination:
-                        LocationDetailView(
-                            location: loc,
+                // 📍 Список найденных локаций
+                List(huntLocations) { location in
+                    NavigationLink(
+                        destination: LocationDetailView(
+                            location: location,
                             userImage: Binding(
-                                get: { userImages[loc.id] },
+                                get: { savedImages[location.id] },
                                 set: { newImage in
+                                    savedImages[location.id] = newImage
                                     if let img = newImage {
-                                        saveImage(img, for: loc)
+                                        saveImage(img, for: location)
                                     }
                                 }
                             ),
-                            onSavePhoto: { location, image in
-                                saveImage(image, for: location)
+                            onSavePhoto: { loc, img in
+                                savedImages[loc.id] = img
+                                saveImage(img, for: loc)
                             }
                         )
                     ) {
                         HStack {
-                            VStack(alignment: .leading) {
-                                Text(loc.name).font(.headline)
-                                Text(loc.address)
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            if let img = userImages[loc.id] {
-                                Image(uiImage: img)
+                            if let thumb = savedImages[location.id] {
+                                Image(uiImage: thumb)
                                     .resizable()
                                     .scaledToFill()
-                                    .frame(width: 45, height: 45)
-                                    .clipShape(Circle())
-                                    .overlay(Circle().stroke(Color.purple, lineWidth: 1))
+                                    .frame(width: 50, height: 50)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .shadow(radius: 2)
+                            } else {
+                                Image(systemName: "photo")
+                                    .frame(width: 50, height: 50)
+                                    .foregroundColor(.gray)
+                            }
+
+                            VStack(alignment: .leading) {
+                                Text(location.name)
+                                    .font(.headline)
+                                Text(location.address)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
                             }
                         }
                     }
                 }
-            }
-            .navigationTitle("City Hunt")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Export PDF") {
-                        generatePDFReport()
+
+                // 🧾 Кнопка экспорта PDF
+                VStack(spacing: 6) {
+                    if isGeneratingPDF {
+                        ProgressView(progressText)
+                            .progressViewStyle(.linear)
+                            .padding(.horizontal)
                     }
+
+                    Button {
+                        Task {
+                            isGeneratingPDF = true
+                            progressText = "Preparing maps..."
+                            let snapshots = await preloadMaps(for: huntLocations)
+                            progressText = "Generating PDF..."
+                            await generatePDFReport(for: huntLocations,
+                                                    images: savedImages,
+                                                    snapshots: snapshots)
+                            isGeneratingPDF = false
+                            progressText = ""
+                        }
+                    } label: {
+                        HStack {
+                            if isGeneratingPDF { ProgressView() }
+                            Label("Export PDF Report", systemImage: "doc.richtext.fill")
+                        }
+                    }
+                    .padding()
+                    .buttonStyle(.borderedProminent)
                 }
             }
-            .task {
-                loadSavedImages()
-            }
+            .navigationTitle("CityChamberHunt")
+        }
+        .onAppear {
+            loadSavedImages()
         }
     }
 
-    // MARK: - 💾 Сохранение фото
-    private func saveImage(_ image: UIImage, for location: HuntLocation) {
+    // MARK: - 📸 Сохранение изображений
+    func saveImage(_ image: UIImage, for location: HuntLocation) {
         guard let data = image.jpegData(compressionQuality: 0.8) else { return }
-
-        let filename = "\(location.id).jpg"
-        let fileURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let filename = "\(location.id.uuidString).jpg"
+        let url = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(filename)
 
         do {
-            try data.write(to: fileURL)
-            userImages[location.id] = image
-            photoInfos[location.id] = HuntPhotoInfo(filename: filename, date: Date())
-            saveInfoToDisk()
-            print("💾 Saved image for \(location.name)")
+            try data.write(to: url)
+            imageFilenames[location.id] = filename
+            saveFilenamesToDefaults()
+            print("✅ Saved image for \(location.name)")
         } catch {
-            print("❌ Error saving image: \(error)")
+            print("❌ Failed to save image:", error)
         }
     }
 
-    private func saveInfoToDisk() {
-        do {
-            let data = try JSONEncoder().encode(photoInfos)
-            try data.write(to: infoURL)
-        } catch {
-            print("❌ Error saving JSON: \(error)")
-        }
-    }
+    // MARK: - 💾 Загрузка сохранённых изображений
+    func loadSavedImages() {
+        guard let data = UserDefaults.standard.data(forKey: filenamesKey),
+              let savedMap = try? JSONDecoder().decode([UUID: String].self, from: data)
+        else { return }
 
-    // MARK: - 📥 Загрузка фото
-    private func loadSavedImages() {
-        print("📥 Loading saved images...")
-        guard let data = try? Data(contentsOf: infoURL),
-              let savedInfos = try? JSONDecoder().decode([String: HuntPhotoInfo].self, from: data)
-        else {
-            print("⚠️ No saved photo info found.")
-            return
-        }
+        imageFilenames = savedMap
+        var loadedImages: [UUID: UIImage] = [:]
 
-        photoInfos = savedInfos
-        for (id, info) in savedInfos {
-            let fileURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent(info.filename)
-            if let imgData = try? Data(contentsOf: fileURL),
-               let image = UIImage(data: imgData) {
-                userImages[id] = image
+        for (id, filename) in savedMap {
+            let url = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent(filename)
+            if let imgData = try? Data(contentsOf: url),
+               let img = UIImage(data: imgData) {
+                loadedImages[id] = img
             }
         }
-        print("✅ Loaded \(userImages.count) saved images.")
+
+        savedImages = loadedImages
+        print("📂 Restored \(savedImages.count) images from disk")
     }
 
-    // MARK: - 🧾 Генерация PDF отчёта
-    private func generatePDFReport() {
-        guard !locations.isEmpty else { return }
+    // MARK: - 🧠 Сохранение имён файлов
+    func saveFilenamesToDefaults() {
+        if let data = try? JSONEncoder().encode(imageFilenames) {
+            UserDefaults.standard.set(data, forKey: filenamesKey)
+        }
+    }
+
+    // MARK: - 🗺 Предзагрузка всех карт с кешированием
+    func preloadMaps(for locations: [HuntLocation]) async -> [UUID: UIImage] {
+        var result: [UUID: UIImage] = [:]
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let fallbackCoordinate = CLLocationCoordinate2D(latitude: 43.6532, longitude: -79.3832)
+
+        for (index, loc) in locations.enumerated() {
+            let mapFilename = "\(loc.id.uuidString)_map.jpg"
+            let mapURL = documents.appendingPathComponent(mapFilename)
+
+            progressText = "Loading map \(index + 1) of \(locations.count)..."
+
+            // Проверяем кеш
+            if let data = try? Data(contentsOf: mapURL),
+               let cached = UIImage(data: data) {
+                result[loc.id] = cached
+                print("🗺 Loaded cached map for \(loc.name)")
+                continue
+            }
+
+            // Создание карты
+            var coord = CLLocationCoordinate2D(latitude: loc.lat, longitude: loc.lon)
+            if coord.latitude == 0 || coord.longitude == 0 {
+                coord = fallbackCoordinate
+            }
+
+            let opts = MKMapSnapshotter.Options()
+            opts.region = MKCoordinateRegion(center: coord,
+                                             latitudinalMeters: 4000,
+                                             longitudinalMeters: 4000)
+            opts.size = CGSize(width: 300, height: 200)
+            opts.scale = UIScreen.main.scale
+
+            do {
+                let snapshot = try await MKMapSnapshotter(options: opts).start()
+                UIGraphicsBeginImageContextWithOptions(opts.size, true, 0)
+                snapshot.image.draw(at: .zero)
+                let pin = UIImage(systemName: "mappin.circle.fill")!
+                let point = snapshot.point(for: coord)
+                pin.draw(at: CGPoint(x: point.x - 12, y: point.y - 24))
+                let final = UIGraphicsGetImageFromCurrentImageContext()
+                UIGraphicsEndImageContext()
+
+                if let img = final {
+                    result[loc.id] = img
+                    if let data = img.jpegData(compressionQuality: 0.9) {
+                        try? data.write(to: mapURL)
+                    }
+                    print("✅ Map preloaded for \(loc.name)")
+                }
+            } catch {
+                print("⚠️ Snapshot failed for \(loc.name): \(error.localizedDescription)")
+            }
+
+            // Пауза для симулятора
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+
+        return result
+    }
+
+    // MARK: - 📄 Генерация PDF
+    func generatePDFReport(for locations: [HuntLocation],
+                           images: [UUID: UIImage],
+                           snapshots: [UUID: UIImage]) async {
+        let pageWidth: CGFloat = 612
+        let pageHeight: CGFloat = 792
+        let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
 
         let format = UIGraphicsPDFRendererFormat()
-        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
+        format.documentInfo = [
+            kCGPDFContextCreator as String: "CityChamberHunt",
+            kCGPDFContextAuthor as String: "Irina Safronova"
+        ]
+
         let renderer = UIGraphicsPDFRenderer(bounds: pageRect, format: format)
-
-        let data = renderer.pdfData { context in
-            context.beginPage()
-            "City Chamber Hunt Report"
-                .draw(in: CGRect(x: 40, y: 150, width: 532, height: 40),
-                      withAttributes: [.font: UIFont.boldSystemFont(ofSize: 26)])
-
+        let data = renderer.pdfData { ctx in
             for loc in locations {
-                context.beginPage()
+                guard let img = images[loc.id] else { continue }
+                ctx.beginPage()
 
-                loc.name.draw(in: CGRect(x: 20, y: 20, width: 572, height: 30),
-                              withAttributes: [.font: UIFont.boldSystemFont(ofSize: 20)])
-                loc.address.draw(in: CGRect(x: 20, y: 60, width: 572, height: 40),
+                // Заголовок и адрес
+                let title = "📍 \(loc.name)"
+                title.draw(in: CGRect(x: 20, y: 20, width: pageWidth - 40, height: 25),
+                           withAttributes: [.font: UIFont.boldSystemFont(ofSize: 18)])
+                loc.address.draw(in: CGRect(x: 20, y: 50, width: pageWidth - 40, height: 40),
                                  withAttributes: [.font: UIFont.systemFont(ofSize: 14)])
 
-                if let img = userImages[loc.id] {
-                    let maxW: CGFloat = 572
-                    let maxH: CGFloat = 400
-                    let ratio = img.size.width / img.size.height
-                    var w = maxW
-                    var h = w / ratio
-                    if h > maxH {
-                        h = maxH
-                        w = h * ratio
-                    }
-                    let rect = CGRect(x: (612 - w)/2, y: 120, width: w, height: h)
-                    img.draw(in: rect)
+                // Фото
+                let maxWidth = pageWidth - 40
+                let aspect = img.size.width / img.size.height
+                let imgRect = CGRect(x: 20, y: 100, width: maxWidth, height: maxWidth / aspect)
+                img.draw(in: imgRect)
+
+                // Карта
+                if let map = snapshots[loc.id] {
+                    let mapRect = CGRect(x: (pageWidth - 300) / 2,
+                                         y: imgRect.maxY + 20,
+                                         width: 300,
+                                         height: 200)
+                    map.draw(in: mapRect)
+                    let footer = "Map data © OpenStreetMap / Apple MapKit"
+                    footer.draw(in: CGRect(x: 20, y: mapRect.maxY + 10,
+                                           width: pageWidth - 40, height: 20),
+                                withAttributes: [.font: UIFont.systemFont(ofSize: 10),
+                                                 .foregroundColor: UIColor.gray])
+                } else {
+                    let placeholder = "🗺 Map unavailable"
+                    placeholder.draw(in: CGRect(x: 20,
+                                                y: imgRect.maxY + 20,
+                                                width: pageWidth - 40,
+                                                height: 30),
+                                     withAttributes: [.font: UIFont.italicSystemFont(ofSize: 14)])
                 }
             }
         }
 
-        let pdfURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("CityHunt_Report.pdf")
-
+        // Экспорт PDF
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CityHunt_Report.pdf")
         do {
-            try data.write(to: pdfURL)
-            let vc = UIActivityViewController(activityItems: [pdfURL], applicationActivities: nil)
+            try data.write(to: tempURL)
+            let vc = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
             if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-               let rootVC = scene.windows.first?.rootViewController {
-                rootVC.present(vc, animated: true)
+               let root = scene.windows.first?.rootViewController {
+                root.present(vc, animated: true)
             }
         } catch {
-            print("❌ PDF error: \(error)")
+            print("❌ PDF save error:", error)
         }
     }
 }

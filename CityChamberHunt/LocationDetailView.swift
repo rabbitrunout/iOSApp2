@@ -25,6 +25,7 @@ struct LocationDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
+                // ✅ FlipCard с постоянным ID
                 FlipCard {
                     VStack(spacing: 12) {
                         Text(location.name)
@@ -67,6 +68,7 @@ struct LocationDetailView: View {
                         Text("No photo yet").foregroundColor(.secondary)
                     }
                 }
+                .id(location.id) // ✅ фикс: стабильный ID, чтобы FlipCard не сбрасывалась
 
                 HStack {
                     Button {
@@ -87,9 +89,7 @@ struct LocationDetailView: View {
         .sheet(isPresented: $showCamera) {
             CameraPicker { image in
                 if let img = image {
-                    userImage = img
-                    saveToDisk(img)
-                    onSavePhoto?(location, img)
+                    saveAndNotify(img)
                 }
             }
         }
@@ -97,9 +97,7 @@ struct LocationDetailView: View {
             Task {
                 if let data = try? await newVal?.loadTransferable(type: Data.self),
                    let img = UIImage(data: data) {
-                    userImage = img
-                    saveToDisk(img)
-                    onSavePhoto?(location, img)
+                    saveAndNotify(img)
                 }
             }
         }
@@ -119,34 +117,27 @@ struct LocationDetailView: View {
         }
     }
 
+    // MARK: - Helpers
+    private func saveAndNotify(_ image: UIImage) {
+        userImage = image
+        saveToDisk(image)
+        onSavePhoto?(location, image)
+    }
+
     private func saveToDisk(_ image: UIImage) {
         guard let data = image.jpegData(compressionQuality: 0.8) else { return }
-        let filename = "\(location.id).jpg"
+        let filename = "\(location.id.uuidString).jpg"
         let url = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(filename)
         try? data.write(to: url)
     }
 
     private func loadFromDisk() -> UIImage? {
-        let filename = "\(location.id).jpg"
+        let filename = "\(location.id.uuidString).jpg"
         let url = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(filename)
         guard let data = try? Data(contentsOf: url),
               let img = UIImage(data: data) else { return nil }
         return img
     }
-}
-
-#Preview {
-    @Previewable @State var testImage: UIImage? = nil
-    return LocationDetailView(
-        location: HuntLocation(
-            name: "Art Gallery",
-            address: "12 King St, Toronto, Canada",
-            lat: 43.65,
-            lon: -79.38
-        ),
-        userImage: $testImage,
-        onSavePhoto: { loc, img in print("✅ Photo saved for \(loc.name)") }
-    )
 }
